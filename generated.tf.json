@@ -1,0 +1,28 @@
+{
+  "resource": {
+    "konnect_gateway_service": {
+      "httpbin_api_via_kong_1": {
+        "name": "httpbin-api-via-kong",
+        "protocol": "https",
+        "host": "example.com",
+        "port": 443,
+        "control_plane_id": "${var.control_plane_id}"
+      }
+    },
+    "konnect_gateway_route": {
+      "httpbin_api_via_kong_getanything_1": {
+        "name": "httpbin-api-via-kong_getanything",
+        "paths": [
+          "~/anything$"
+        ],
+        "methods": [
+          "GET"
+        ],
+        "service": {
+          "id": "${konnect_gateway_service.httpbin_api_via_kong_1.id}"
+        },
+        "control_plane_id": "${var.control_plane_id}"
+      }
+    }
+  }
+}

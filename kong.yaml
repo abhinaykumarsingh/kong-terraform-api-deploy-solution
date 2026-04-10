@@ -1,0 +1,22 @@
+_format_version: "3.0"
+services:
+- host: httpbin.org
+  id: 34ce0f76-4736-5be0-9a1a-06161b513816
+  name: httpbin-api-via-kong
+  path: /
+  plugins: []
+  port: 443
+  protocol: https
+  routes:
+  - id: d30974ed-2714-5ebe-b4f1-8b7fb7c78424
+    methods:
+    - GET
+    name: httpbin-api-via-kong_getanything
+    paths:
+    - ~/anything$
+    plugins: []
+    regex_priority: 200
+    strip_path: false
+    tags: []
+  tags: []
+upstreams: []
