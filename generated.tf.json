@@ -4,8 +4,9 @@
       "httpbin_api_via_kong_1": {
         "name": "httpbin-api-via-kong",
         "protocol": "https",
-        "host": "example.com",
+        "host": "httpbin.org",
         "port": 443,
+        "path": "/",
         "control_plane_id": "${var.control_plane_id}"
       }
     },
@@ -22,6 +23,31 @@
           "id": "${konnect_gateway_service.httpbin_api_via_kong_1.id}"
         },
         "control_plane_id": "${var.control_plane_id}"
+      }
+    },
+    "konnect_gateway_plugin_key_auth": {
+      "httpbin_api_via_kong_1_keyauth": {
+        "control_plane_id": "${var.control_plane_id}",
+        "service": {
+          "id": "${konnect_gateway_service.httpbin_api_via_kong_1.id}"
+        },
+        "config": {
+          "key_names": [
+            "apikey"
+          ]
+        }
+      }
+    },
+    "konnect_gateway_plugin_rate_limiting": {
+      "httpbin_api_via_kong_1_ratelimit": {
+        "control_plane_id": "${var.control_plane_id}",
+        "service": {
+          "id": "${konnect_gateway_service.httpbin_api_via_kong_1.id}"
+        },
+        "config": {
+          "minute": 5,
+          "policy": "local"
+        }
       }
     }
   }

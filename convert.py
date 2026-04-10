@@ -1,86 +1,148 @@
 import yaml
 import json
 import re
-from urllib.parse import urlparse
 
 CONTROL_PLANE_VAR = "${var.control_plane_id}"
 
+# =========================================================
+# SAFE NAME
+# =========================================================
 def safe_name(name):
-    """Convert names into Terraform-safe identifiers"""
+    if not name:
+        raise ValueError("❌ Name is missing")
+
     name = name.lower()
     name = re.sub(r'[^a-z0-9_]', '_', name)
     return name
 
-def parse_url(url):
-    """Extract protocol, host, port from URL safely"""
-    parsed = urlparse(url)
 
-    protocol = parsed.scheme if parsed.scheme else "https"
-    host = parsed.hostname if parsed.hostname else "example.com"
-
-    if parsed.port:
-        port = parsed.port
-    else:
-        port = 443 if protocol == "https" else 80
-
-    return protocol, host, port
-
-# Load kong.yaml
+# =========================================================
+# LOAD YAML
+# =========================================================
 with open("kong.yaml") as f:
     kong = yaml.safe_load(f)
 
+if not kong:
+    raise ValueError("❌ YAML file is empty or invalid")
+
+
+# =========================================================
+# INIT TF STRUCTURE
+# =========================================================
 tf = {
     "resource": {
         "konnect_gateway_service": {},
         "konnect_gateway_route": {},
-        "konnect_gateway_plugin": {}
+        "konnect_gateway_plugin_key_auth": {},
+        "konnect_gateway_plugin_rate_limiting": {}
     }
 }
 
 service_count = 0
 route_count = 0
-plugin_count = 0
 
-for svc in kong.get("services", []):
-    service_count += 1
 
-    svc_name = safe_name(svc["name"]) + f"_{service_count}"
+# =========================================================
+# DETECT KONG FORMAT
+# =========================================================
+if "services" in kong:
+    print("🔍 Detected Kong format")
 
-    # ✅ Extract URL properly
-    url = svc.get("url", "")
-    protocol, host, port = parse_url(url)
+    for svc in kong.get("services", []):
+        service_count += 1
 
-    # ✅ SERVICE (correct schema)
-    tf["resource"]["konnect_gateway_service"][svc_name] = {
-        "name": svc["name"],
-        "protocol": protocol,
-        "host": host,
-        "port": port,
-        "control_plane_id": CONTROL_PLANE_VAR
-    }
+        svc_name_raw = svc.get("name")
+        if not svc_name_raw:
+            raise ValueError("❌ Service name missing")
 
-    # ✅ ROUTES (correct linking)
-    for route in svc.get("routes", []):
-        route_count += 1
+        svc_name = safe_name(svc_name_raw) + f"_{service_count}"
 
-        route_name = safe_name(route["name"]) + f"_{route_count}"
+        # =====================================================
+        # FIX: USE DIRECT FIELDS FROM DECK OUTPUT
+        # =====================================================
+        protocol = svc.get("protocol")
+        host = svc.get("host")
+        port = svc.get("port")
 
-        tf["resource"]["konnect_gateway_route"][route_name] = {
-            "name": route["name"],
-            "paths": route.get("paths", []),
-            "methods": route.get("methods", []),
-            "service": {
-                "id": f"${{konnect_gateway_service.{svc_name}.id}}"
-            },
+        if not protocol or not host or not port:
+            raise ValueError(
+                f"❌ Incomplete service definition for {svc_name_raw} "
+                f"(protocol/host/port missing)"
+            )
+
+        # SERVICE
+        tf["resource"]["konnect_gateway_service"][svc_name] = {
+            "name": svc_name_raw,
+            "protocol": protocol,
+            "host": host,
+            "port": port,
+            "path": "/",
             "control_plane_id": CONTROL_PLANE_VAR
         }
 
+        # =====================================================
+        # PLUGINS (KEY AUTH)
+        # =====================================================
+        tf["resource"]["konnect_gateway_plugin_key_auth"][f"{svc_name}_keyauth"] = {
+            "control_plane_id": CONTROL_PLANE_VAR,
+            "service": {
+                "id": f"${{konnect_gateway_service.{svc_name}.id}}"
+            },
+            "config": {
+                "key_names": ["apikey"]
+            }
+        }
 
-# ✅ Remove empty blocks
+        # =====================================================
+        # PLUGINS (RATE LIMIT)
+        # =====================================================
+        tf["resource"]["konnect_gateway_plugin_rate_limiting"][f"{svc_name}_ratelimit"] = {
+            "control_plane_id": CONTROL_PLANE_VAR,
+            "service": {
+                "id": f"${{konnect_gateway_service.{svc_name}.id}}"
+            },
+            "config": {
+                "minute": 5,
+                "policy": "local"
+            }
+        }
+
+        # =====================================================
+        # ROUTES
+        # =====================================================
+        for route in svc.get("routes", []):
+            route_count += 1
+
+            route_name_raw = route.get("name")
+            if not route_name_raw:
+                raise ValueError(f"❌ Route name missing in service {svc_name_raw}")
+
+            route_name = safe_name(route_name_raw) + f"_{route_count}"
+
+            tf["resource"]["konnect_gateway_route"][route_name] = {
+                "name": route_name_raw,
+                "paths": route.get("paths"),
+                "methods": route.get("methods"),
+                "service": {
+                    "id": f"${{konnect_gateway_service.{svc_name}.id}}"
+                },
+                "control_plane_id": CONTROL_PLANE_VAR
+            }
+
+else:
+    raise ValueError("❌ Unsupported YAML format (missing services)")
+
+
+# =========================================================
+# CLEANUP EMPTY RESOURCES
+# =========================================================
 tf["resource"] = {k: v for k, v in tf["resource"].items() if v}
 
-# Write Terraform JSON
+
+# =========================================================
+# WRITE OUTPUT
+# =========================================================
 with open("generated.tf.json", "w") as f:
     json.dump(tf, f, indent=2)
 
-print("✅ generated.tf.json created successfully")
+print("✅ Terraform JSON generated successfully")
